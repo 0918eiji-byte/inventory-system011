@@ -4,11 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>在庫管理システム</title>
-<script type="module">
-  // Firebase初期化はmoduleスクリプトで行う
-</script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -788,104 +783,6 @@ const FB_CONFIG = {
   authDomain: "inventory-1929a.firebaseapp.com",
   databaseURL: "https://inventory-1929a-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "inventory-1929a",
-  appId: "1:890419289292:web:be355be81b2485d81f7669"
-};
-
-let fbApp, fbDb, fbRef;
-let fbLastUpdate = 0;
-let fbLocalChange = false;
-
-function initFirebase() {
-  try {
-    fbApp = firebase.initializeApp(FB_CONFIG);
-    fbDb = firebase.database();
-    fbRef = fbDb.ref('inventory');
-    console.log('Firebase initialized');
-    return true;
-  } catch(e) {
-    console.warn('Firebase init failed:', e);
-    return false;
-  }
-}
-
-// Firebase にデータを書き込む
-async function fbPush() {
-  if (!fbRef) return;
-  setSyncStatus('syncing', 'SYNCING...');
-  try {
-    const data = JSON.parse(JSON.stringify(S)); // deep copy
-    data._updatedAt = Date.now();
-    await fbRef.set(data);
-    fbLastUpdate = data._updatedAt;
-    fbLocalChange = false;
-    setSyncStatus('ok', 'SYNCED ✓');
-    setTimeout(() => setSyncStatus('', 'LIVE'), 2000);
-  } catch(e) {
-    setSyncStatus('err', 'SYNC ERR');
-    console.warn('fbPush error:', e);
-  }
-}
-
-// Firebase からデータを読み込む（1回）
-async function fbPull() {
-  if (!fbRef) return false;
-  setSyncStatus('syncing', 'LOADING...');
-  try {
-    const snap = await fbRef.once('value');
-    const data = snap.val();
-    if (!data || !data.products) {
-      setSyncStatus('', 'LIVE');
-      return false;
-    }
-    applyData(data);
-    setSyncStatus('ok', 'LOADED ✓');
-    setTimeout(() => setSyncStatus('', 'LIVE'), 2000);
-    return true;
-  } catch(e) {
-    setSyncStatus('', 'LOCAL');
-    console.warn('fbPull error:', e);
-    return false;
-  }
-}
-
-// リアルタイムリスナー：他のユーザーの変更を自動受信
-function startRealtimeSync() {
-  if (!fbRef) return;
-  fbRef.on('value', (snap) => {
-    const data = snap.val();
-    if (!data || !data.products) return;
-    // 自分が書き込んだ更新は無視
-    if (data._updatedAt && data._updatedAt === fbLastUpdate) return;
-    // 他デバイスの変更を受信
-    applyData(data);
-    applyRemoteData();
-    setSyncStatus('ok', '↑ 同期済');
-    setTimeout(() => setSyncStatus('', 'LIVE'), 2000);
-  });
-  console.log('Realtime sync started');
-}
-
-function applyData(data) {
-  S = Object.assign({
-    products:[], materials:[], members:[], logs:[],
-    orgs:[], reservations:[], alchRecipes:[],
-    permConfig:null, settings:{}
-  }, data);
-  delete S._updatedAt;
-  if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
-  if (!S.alchRecipes) S.alchRecipes = [];
-  lsSave(S);
-}
-
-
-// ═══════════════════════════════
-//  FIREBASE REALTIME DATABASE
-// ═══════════════════════════════
-const FB_CONFIG = {
-  apiKey: "AIzaSyBAH8t6sIEpjSqPLGBqVr8Hr8_5HCHDfhg",
-  authDomain: "inventory-1929a.firebaseapp.com",
-  databaseURL: "https://inventory-1929a-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "inventory-1929a",
   storageBucket: "inventory-1929a.firebasestorage.app",
   messagingSenderId: "890419289292",
   appId: "1:890419289292:web:be355be81b2485d81f7669"
@@ -915,7 +812,6 @@ function initFirebase() {
   }
 }
 
-// Firebaseにデータを書き込む
 async function fbPush() {
   if (!fbRef) return;
   try {
@@ -928,29 +824,21 @@ async function fbPush() {
   }
 }
 
-// Firebaseのリアルタイム更新を購読
 function fbSubscribe() {
   if (!fbRef) return;
-  // 既存リスナーを解除
   if (fbListener) fbRef.off('value', fbListener);
-
   let isSelfPush = false;
   fbListener = fbRef.on('value', (snapshot) => {
     const data = snapshot.val();
     if (!data || !data.products) return;
-
-    // 自分のPush直後は500ms無視（チラつき防止）
-    if(isSelfPush){ isSelfPush=false; return; }
-
     S = Object.assign({
-      products: [], materials: [], members: [], logs: [],
-      orgs: [], reservations: [], alchRecipes: [],
-      permConfig: null, settings: {}
+      products:[], materials:[], members:[], logs:[],
+      orgs:[], reservations:[], alchRecipes:[],
+      permConfig:null, settings:{}
     }, data);
     if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
     if (!S.alchRecipes) S.alchRecipes = [];
     lsSave(S);
-
     applyRemoteData();
     setSyncStatus('ok', '● LIVE');
   }, (err) => {
@@ -1063,14 +951,12 @@ async function init(){
   dcUrl = localStorage.getItem('dc_url')||'';
   dcEnabled = localStorage.getItem('dc_enabled')==='1';
 
-  // Firebase 初期化
-  const fbOk = initFirebase();
-
-  if(fbOk){
-    setSyncStatus('syncing','LOADING...');
-    await fbPull();
-    startRealtimeSync();
+  // Firebase 初期化 → リアルタイム購読開始
+  if(initFirebase()){
+    setSyncStatus('ok','● LIVE');
+    fbSubscribe(); // リアルタイム購読（変更があると自動でUIに反映）
   } else {
+    // Firebase失敗時はlocalStorageから読み込み
     const saved = lsLoad();
     if(saved){
       S = Object.assign({products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],alchRecipes:[],permConfig:null,settings:{}},saved);
@@ -1079,8 +965,7 @@ async function init(){
     if(!S.orgs)S.orgs=[];
     if(!S.reservations)S.reservations=[];
     if(!S.alchRecipes)S.alchRecipes=[];
-    if(gsUrl){setSyncStatus('','SHEETS');await gsPull();}
-    else{setSyncStatus('','LOCAL');}
+    setSyncStatus('err','FB ERROR');
   }
 
   const sid=sessLoad();
