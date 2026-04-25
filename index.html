@@ -552,14 +552,16 @@ input[type=number]{font-size:16px;padding:10px 12px}
   </div>
   <div id="adm-mat" class="stab" style="display:none">
     <div class="card"><div class="card-t">素材を追加</div>
+      <div class="row" style="margin-bottom:8px">
+        <div style="flex:2;min-width:120px"><label class="lbl">素材名</label><input id="am-n" placeholder="素材名"></div>
+        <div style="flex:1;min-width:80px"><label class="lbl">カテゴリー</label><input id="am-c"></div>
+        <div style="width:70px"><label class="lbl">在庫数</label><input id="am-q" type="number" min="0" placeholder="0"></div>
+        <div style="width:55px"><label class="lbl">単位</label><input id="am-u" placeholder="枚"></div>
+      </div>
       <div class="row">
-        <div style="flex:2;min-width:100px"><label class="lbl">素材名</label><input id="am-n" placeholder="素材名"></div>
-        <div style="flex:1;min-width:60px"><label class="lbl">カテゴリー</label><input id="am-c"></div>
-        <div style="width:58px"><label class="lbl">在庫数</label><input id="am-q" type="number" min="0" placeholder="0"></div>
-        <div style="width:44px"><label class="lbl">単位</label><input id="am-u" placeholder="枚"></div>
-        <div style="width:55px"><label class="lbl">閾値</label><input id="am-t" type="number" min="0" placeholder="5"></div>
-        <div style="width:78px"><label class="lbl">買取単価(¥)</label><input id="am-bp" type="number" min="0" placeholder="0"></div>
-        <button class="btn bp bs" onclick="addMat()">追加</button>
+        <div style="width:80px"><label class="lbl">閾値</label><input id="am-t" type="number" min="0" placeholder="5"></div>
+        <div style="width:110px"><label class="lbl">買取単価(¥)</label><input id="am-bp" type="number" min="0" placeholder="0"></div>
+        <button class="btn bp bs" style="align-self:flex-end;white-space:nowrap" onclick="addMat()">追加</button>
       </div>
     </div>
     <div class="card"><div class="card-t">素材一覧</div><div class="tbl-wrap"><table style="min-width:430px"><thead><tr>
@@ -665,7 +667,10 @@ input[type=number]{font-size:16px;padding:10px 12px}
         <input type="checkbox" id="dc-enabled" style="width:auto;margin:0;accent-color:var(--or)" onchange="saveDcSettings()">
         <label style="font-size:12px;color:var(--tx2);cursor:pointer" for="dc-enabled">操作ログをDiscordに自動送信する</label>
       </div>
-      <div style="font-size:11px;color:var(--tx3);margin-bottom:10px">送信される操作: 販売・クラフト・素材買い取り・錬金・団体販売受け渡し</div>
+      <div style="font-size:11px;color:var(--tx3);margin-bottom:14px">送信される操作: 販売・クラフト・素材買い取り・錬金・団体販売受け渡し</div>
+      <div class="card-t" style="font-size:12px;margin-bottom:8px">操作種別ごとのチャンネル設定 <span style="font-size:10px;color:var(--tx3);font-family:inherit">(空欄の場合はデフォルトURLを使用)</span></div>
+      <div id="dc-channels-form"></div>
+      <div style="margin-top:10px"><button class="btn bp bs" onclick="saveDcChannels()">チャンネル設定を保存</button></div>
     </div>
     <div class="card">
       <div class="card-t">送信フォーマットプレビュー</div>
@@ -891,6 +896,7 @@ let matEdits = {}, matCat = null;
 let gsUrl = '';
 let dcUrl = '';
 let dcEnabled = false;
+let dcChannels = {}; // {SALE:'url', CRAFT:'url', ...}
 
 const DEFAULT_PERM = {
   admin:['sale','craft','grp','stock','matmgmt','buymat','alch','admin'],
@@ -977,6 +983,7 @@ async function init(){
   gsUrl = gsUrlLoad();
   dcUrl = localStorage.getItem('dc_url')||'';
   dcEnabled = localStorage.getItem('dc_enabled')==='1';
+  try{ dcChannels = JSON.parse(localStorage.getItem('dc_channels')||'{}'); }catch(e){ dcChannels={}; }
 
   // Firebase 初期化
   if(initFirebase()){
@@ -1248,7 +1255,10 @@ function renderGrpHist(){
     <div style="font-size:12px;color:var(--tx2);margin-bottom:8px">${r.items.map(i=>`${i.productName} ×${i.qty}`).join('、')}</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:13px;font-weight:700;font-family:'Rajdhani',sans-serif;color:var(--or)">合計: ¥${r.items.reduce((s,i)=>s+i.price*i.qty,0).toLocaleString()}</span>
-      ${r.status==='pending'?`<button class="btn bp bs" onclick="completeReservation(${r.id})">受け渡し完了</button>`:'<span style="font-size:11px;color:var(--tx3)">受渡済</span>'}
+      <div style="display:flex;gap:8px">
+        ${r.status==='pending'?`<button class="btn bp bs" onclick="completeReservation(${r.id})">受け渡し完了</button>`:''}
+        ${r.status==='pending'?`<button class="btn bd-btn bs" onclick="cancelReservation(${r.id})">予約取り消し</button>`:'<span style="font-size:11px;color:var(--tx3)">受渡済</span>'}
+      </div>
     </div>
   </div>`).join('');
 }
@@ -1319,6 +1329,17 @@ function completeReservation(id){
   res.completedBy=op?.name;
   const grpLogTxt=`受け渡し完了: ${res.orgName} / ${res.memberName}`;addLog('GRP',grpLogTxt,op?.name);dcSend('GRP',grpLogTxt,op?.name);
   renderGrpHist();toast('受け渡しを完了しました');
+}
+function cancelReservation(id){
+  const res=S.reservations.find(r=>r.id===id);
+  if(!res||res.status!=='pending')return;
+  if(!confirm(`「${res.orgName} / ${res.memberName}」の予約を取り消しますか？`))return;
+  const cancelTxt=`予約取り消し: ${res.orgName} / ${res.memberName}`;
+  // GRPチャンネルに通知
+  dcSendToChannel('GRP', cancelTxt, op?.name);
+  addLog('GRP', cancelTxt, op?.name);
+  S.reservations=S.reservations.filter(r=>r.id!==id);
+  save();renderGrpHist();toast('予約を取り消しました');
 }
 function renderGrpOrgs(){document.getElementById('grp-org-list').innerHTML=S.orgs.length?S.orgs.map((o,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:var(--bd2);font-size:12px"><div style="flex:1"><div style="font-weight:500">${o.name}</div><div style="font-size:10px;color:var(--tx3)">${o.memo||''}</div></div><button class="btn bs bd-btn" onclick="delOrg(${i})">削除</button></div>`).join(''):'<div class="empty">登録された団体がありません</div>';}
 function addOrg(){const n=document.getElementById('org-n').value.trim();if(!n){toast('団体名が必要です',false);return;}if(S.orgs.find(o=>o.name===n)){toast('既に登録されています',false);return;}S.orgs.push({id:Date.now(),name:n,memo:document.getElementById('org-m').value.trim()});const addOrgTxt=`団体「${n}」追加`;addLog('ADMIN',addOrgTxt,op?.name);dcSend('ADMIN',addOrgTxt,op?.name);save();['org-n','org-m'].forEach(id=>document.getElementById(id).value='');renderGrpOrgs();toast(`「${n}」を追加しました`);}
@@ -1506,6 +1527,7 @@ function renderAdmMats(){document.getElementById('adm-mat-tb').innerHTML=S.mater
   <td><input type="number" value="${m.qty}" style="width:55px;font-size:12px;background:var(--bg3);border:var(--bd2);border-radius:4px;color:var(--tx);padding:3px 6px" min="0" onchange="chgMQ(${i},this.value)"></td>
   <td><input value="${m.unit||''}" style="width:40px;font-size:12px;background:var(--bg3);border:var(--bd2);border-radius:4px;color:var(--tx);padding:3px 6px" onchange="S.materials[${i}].unit=this.value;save()"></td>
   <td><input type="number" value="${m.threshold||5}" style="width:50px;font-size:12px;background:var(--bg3);border:var(--bd2);border-radius:4px;color:var(--tx);padding:3px 6px" min="0" onchange="S.materials[${i}].threshold=+this.value;save()"></td>
+  <td><input type="number" value="${m.buyPrice||0}" style="width:68px;font-size:12px;background:var(--bg3);border:var(--bd2);border-radius:4px;color:var(--tx);padding:3px 6px" min="0" onchange="S.materials[${i}].buyPrice=+this.value;save()"></td>
   <td><span class="badge ${s.c}">${s.l}</span></td>
   <td><button class="btn bs bd-btn" onclick="delMat(${i})">削除</button></td>
 </tr>`}).join(''):`<tr><td colspan='8'><div class='empty'>なし</div></td></tr>`;}
@@ -1822,8 +1844,20 @@ function applyRemoteData(){
 const DC_ICONS = {SALE:'📦',CRAFT:'🔨',BUY:'📥',ALCH:'⚗️',GRP:'🤝',STK:'📋',ADMIN:'⚙️'};
 const DC_LABELS = {SALE:'販売報告',CRAFT:'クラフト制作報告',BUY:'素材買い取り',ALCH:'錬金実行',GRP:'団体販売',STK:'在庫修正',ADMIN:'管理操作'};
 
+// チャンネル別送信（種別ごとのURLがあればそちら、なければデフォルト）
+async function dcSendToChannel(type, text, opName){
+  if(!dcEnabled) return;
+  const channelUrl = dcChannels[type] || dcUrl; // 種別URL優先、なければデフォルト
+  if(!channelUrl) return;
+  await dcSendToUrl(channelUrl, type, text, opName);
+}
+
 async function dcSend(type, text, opName){
-  if(!dcEnabled || !dcUrl) return;
+  await dcSendToChannel(type, text, opName);
+}
+
+async function dcSendToUrl(url, type, text, opName){
+  if(!url) return;
   const now = new Date();
   const timeStr = now.toLocaleDateString('ja-JP',{month:'2-digit',day:'2-digit'}) + ' ' + now.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
   const icon = DC_ICONS[type] || '📌';
@@ -1848,23 +1882,15 @@ async function dcSend(type, text, opName){
   // dcUrlがGAS URLの場合: ?webhook=<encoded>&payload=<encoded> でGETリクエスト
   // dcUrlがDiscord Webhook直接の場合: GAS中継URLが別途設定されていればそちら経由
   const gasRelay = localStorage.getItem('gas_relay_url') || gsUrl || '';
+  const dcUrlToUse = url;
   if(gasRelay){
-    // GAS中継経由（推奨）
-    const params = new URLSearchParams({
-      webhook: dcUrl,
-      payload: JSON.stringify(payload)
-    });
+    const params = new URLSearchParams({webhook: url, payload: JSON.stringify(payload)});
     try{
       await fetch(gasRelay + '?' + params.toString(), {method:'GET', mode:'no-cors'});
     }catch(e){ console.warn('Discord GAS中継送信失敗:',e.message); }
   } else {
-    // 直接送信（httpsホスト環境のみ動作）
     try{
-      await fetch(dcUrl,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload)
-      });
+      await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     }catch(e){ console.warn('Discord直接送信失敗:',e.message); }
   }
 }
@@ -1876,6 +1902,7 @@ function saveDcUrl(){
   localStorage.setItem('dc_url', url);
   if(relay) localStorage.setItem('gas_relay_url', relay);
   else localStorage.removeItem('gas_relay_url');
+  saveDcChannels();
   toast(url ? 'Discord設定を保存しました' : '連携を無効にしました');
 }
 function saveDcSettings(){
@@ -1910,6 +1937,33 @@ function renderDiscordTab(){
   document.getElementById('dc-url').value = dcUrl||'';
   document.getElementById('dc-enabled').checked = dcEnabled;
   document.getElementById('dc-gas-relay').value = localStorage.getItem('gas_relay_url')||'';
+  // チャンネル別URL入力欄
+  const CHANNEL_TYPES = [
+    {id:'SALE',label:'📦 販売報告'},
+    {id:'CRAFT',label:'🔨 クラフト制作'},
+    {id:'BUY',label:'📥 素材買い取り'},
+    {id:'ALCH',label:'⚗️ 錬金'},
+    {id:'GRP',label:'🤝 団体販売'},
+    {id:'STK',label:'📋 在庫修正'},
+    {id:'ADMIN',label:'⚙️ 管理操作'},
+  ];
+  const form = document.getElementById('dc-channels-form');
+  if(form) form.innerHTML = CHANNEL_TYPES.map(t=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <div style="width:110px;font-size:12px;color:var(--tx2);flex-shrink:0">${t.label}</div>
+      <input id="dc-ch-${t.id}" placeholder="Webhook URL（空欄=デフォルト）" value="${dcChannels[t.id]||''}" style="flex:1;font-size:11px;padding:6px 10px">
+    </div>`).join('');
+}
+
+function saveDcChannels(){
+  const CHANNEL_TYPES = ['SALE','CRAFT','BUY','ALCH','GRP','STK','ADMIN'];
+  dcChannels = {};
+  CHANNEL_TYPES.forEach(t=>{
+    const el = document.getElementById('dc-ch-'+t);
+    if(el && el.value.trim()) dcChannels[t] = el.value.trim();
+  });
+  localStorage.setItem('dc_channels', JSON.stringify(dcChannels));
+  toast('チャンネル設定を保存しました');
 }
 
 // ═══════════════════════════════
