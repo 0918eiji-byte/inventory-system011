@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>在庫管理システム</title>
+<script type="module">
+  // Firebase初期化はmoduleスクリプトで行う
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -262,6 +267,10 @@ input[type=number]{font-size:16px;padding:10px 12px}
 .dc-fv{color:#dcddde;font-size:12px}
 
 </style>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
 </head>
 <body>
 <div id="app">
@@ -273,7 +282,7 @@ input[type=number]{font-size:16px;padding:10px 12px}
     <div class="hdr-sub">Inventory Management System</div>
   </div>
   <div class="hdr-right">
-    <div id="sync-status" class=""><div class="sync-dot"></div><span id="sync-txt">LOCAL</span></div>
+    <div id="sync-status" class=""><div class="sync-dot"></div><span id="sync-txt">CONNECTING...</span></div>
     <div class="op-chip" id="op-chip" onclick="doLogout()" style="display:none">
       <div class="op-dot"></div><span id="op-name">—</span><span style="color:var(--tx3);font-size:10px">▼ LOGOUT</span>
     </div>
@@ -518,6 +527,7 @@ input[type=number]{font-size:16px;padding:10px 12px}
     <button class="anb" onclick="goAdmTab('adm-log',this)">ログ</button>
     <button class="anb" onclick="goAdmTab('adm-discord',this)">Discord</button>
     <button class="anb" onclick="goAdmTab('adm-gs',this)">Google Sheets</button>
+    <button class="anb" onclick="goAdmTab('adm-firebase',this)">Firebase</button>
     <button class="anb" onclick="goAdmTab('adm-misc',this)">その他</button>
   </div>
   <div id="adm-ov" class="stab on">
@@ -716,6 +726,24 @@ input[type=number]{font-size:16px;padding:10px 12px}
       <div class="code-block" id="gs-code-block"></div>
     </div>
   </div>
+  <div id="adm-firebase" class="stab" style="display:none">
+    <div class="card" style="background:rgba(224,124,16,.08);border-color:rgba(224,124,16,.3)">
+      <div class="card-t">Firebase 設定情報</div>
+      <div style="font-size:12px;color:var(--tx2);line-height:1.9">
+        <div style="margin-bottom:8px">接続状態: <span id="fb-status-txt" style="color:var(--ok)">確認中...</span></div>
+        <div style="margin-bottom:8px;color:var(--or)">⚠ テストモードのセキュリティルールは<strong>30日で期限切れ</strong>になります。</div>
+        <div>期限切れになったら Firebase Console → Realtime Database → ルール で以下に変更してください：</div>
+        <div style="background:var(--bg);border-radius:var(--r);padding:10px;margin-top:8px;font-family:monospace;font-size:11px;color:#9ab">
+{<br>
+&nbsp;&nbsp;"rules": {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;".read": true,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;".write": true<br>
+&nbsp;&nbsp;}<br>
+}
+        </div>
+      </div>
+    </div>
+  </div>
   <div id="adm-misc" class="stab" style="display:none">
     <div class="card"><div class="card-t">データ操作</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -751,6 +779,186 @@ input[type=number]{font-size:16px;padding:10px 12px}
 <div class="toast" id="toast"></div>
 
 <script>
+
+// ═══════════════════════════════
+//  FIREBASE REALTIME DATABASE
+// ═══════════════════════════════
+const FB_CONFIG = {
+  apiKey: "AIzaSyBAH8t6sIEpjSqPLGBqVr8Hr8_5HCHDfhg",
+  authDomain: "inventory-1929a.firebaseapp.com",
+  databaseURL: "https://inventory-1929a-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "inventory-1929a",
+  appId: "1:890419289292:web:be355be81b2485d81f7669"
+};
+
+let fbApp, fbDb, fbRef;
+let fbLastUpdate = 0;
+let fbLocalChange = false;
+
+function initFirebase() {
+  try {
+    fbApp = firebase.initializeApp(FB_CONFIG);
+    fbDb = firebase.database();
+    fbRef = fbDb.ref('inventory');
+    console.log('Firebase initialized');
+    return true;
+  } catch(e) {
+    console.warn('Firebase init failed:', e);
+    return false;
+  }
+}
+
+// Firebase にデータを書き込む
+async function fbPush() {
+  if (!fbRef) return;
+  setSyncStatus('syncing', 'SYNCING...');
+  try {
+    const data = JSON.parse(JSON.stringify(S)); // deep copy
+    data._updatedAt = Date.now();
+    await fbRef.set(data);
+    fbLastUpdate = data._updatedAt;
+    fbLocalChange = false;
+    setSyncStatus('ok', 'SYNCED ✓');
+    setTimeout(() => setSyncStatus('', 'LIVE'), 2000);
+  } catch(e) {
+    setSyncStatus('err', 'SYNC ERR');
+    console.warn('fbPush error:', e);
+  }
+}
+
+// Firebase からデータを読み込む（1回）
+async function fbPull() {
+  if (!fbRef) return false;
+  setSyncStatus('syncing', 'LOADING...');
+  try {
+    const snap = await fbRef.once('value');
+    const data = snap.val();
+    if (!data || !data.products) {
+      setSyncStatus('', 'LIVE');
+      return false;
+    }
+    applyData(data);
+    setSyncStatus('ok', 'LOADED ✓');
+    setTimeout(() => setSyncStatus('', 'LIVE'), 2000);
+    return true;
+  } catch(e) {
+    setSyncStatus('', 'LOCAL');
+    console.warn('fbPull error:', e);
+    return false;
+  }
+}
+
+// リアルタイムリスナー：他のユーザーの変更を自動受信
+function startRealtimeSync() {
+  if (!fbRef) return;
+  fbRef.on('value', (snap) => {
+    const data = snap.val();
+    if (!data || !data.products) return;
+    // 自分が書き込んだ更新は無視
+    if (data._updatedAt && data._updatedAt === fbLastUpdate) return;
+    // 他デバイスの変更を受信
+    applyData(data);
+    applyRemoteData();
+    setSyncStatus('ok', '↑ 同期済');
+    setTimeout(() => setSyncStatus('', 'LIVE'), 2000);
+  });
+  console.log('Realtime sync started');
+}
+
+function applyData(data) {
+  S = Object.assign({
+    products:[], materials:[], members:[], logs:[],
+    orgs:[], reservations:[], alchRecipes:[],
+    permConfig:null, settings:{}
+  }, data);
+  delete S._updatedAt;
+  if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
+  if (!S.alchRecipes) S.alchRecipes = [];
+  lsSave(S);
+}
+
+
+// ═══════════════════════════════
+//  FIREBASE REALTIME DATABASE
+// ═══════════════════════════════
+const FB_CONFIG = {
+  apiKey: "AIzaSyBAH8t6sIEpjSqPLGBqVr8Hr8_5HCHDfhg",
+  authDomain: "inventory-1929a.firebaseapp.com",
+  databaseURL: "https://inventory-1929a-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "inventory-1929a",
+  storageBucket: "inventory-1929a.firebasestorage.app",
+  messagingSenderId: "890419289292",
+  appId: "1:890419289292:web:be355be81b2485d81f7669"
+};
+
+let fbApp = null;
+let fbDb = null;
+let fbRef = null;
+let fbListener = null;
+
+function initFirebase() {
+  try {
+    if (typeof firebase === 'undefined') {
+      console.warn('Firebase SDK not loaded');
+      return false;
+    }
+    if (!fbApp) {
+      fbApp = firebase.initializeApp(FB_CONFIG);
+    }
+    fbDb = firebase.database();
+    fbRef = fbDb.ref('inventory');
+    console.log('Firebase initialized OK');
+    return true;
+  } catch(e) {
+    console.warn('Firebase init error:', e);
+    return false;
+  }
+}
+
+// Firebaseにデータを書き込む
+async function fbPush() {
+  if (!fbRef) return;
+  try {
+    await fbRef.set(S);
+    setSyncStatus('ok', 'SYNCED ✓');
+    setTimeout(() => setSyncStatus('', '● LIVE'), 2000);
+  } catch(e) {
+    console.warn('Firebase push error:', e);
+    setSyncStatus('err', 'SYNC ERR');
+  }
+}
+
+// Firebaseのリアルタイム更新を購読
+function fbSubscribe() {
+  if (!fbRef) return;
+  // 既存リスナーを解除
+  if (fbListener) fbRef.off('value', fbListener);
+
+  let isSelfPush = false;
+  fbListener = fbRef.on('value', (snapshot) => {
+    const data = snapshot.val();
+    if (!data || !data.products) return;
+
+    // 自分のPush直後は500ms無視（チラつき防止）
+    if(isSelfPush){ isSelfPush=false; return; }
+
+    S = Object.assign({
+      products: [], materials: [], members: [], logs: [],
+      orgs: [], reservations: [], alchRecipes: [],
+      permConfig: null, settings: {}
+    }, data);
+    if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
+    if (!S.alchRecipes) S.alchRecipes = [];
+    lsSave(S);
+
+    applyRemoteData();
+    setSyncStatus('ok', '● LIVE');
+  }, (err) => {
+    console.warn('Firebase listen error:', err);
+    setSyncStatus('err', 'SYNC ERR');
+  });
+}
+
 // ═══════════════════════════════
 //  STATE
 // ═══════════════════════════════
@@ -832,9 +1040,12 @@ async function gsPull(){
 
 async function save(){
   lsSave(S);
-  if(gsUrl)gsPush();
+  if(fbRef){
+    fbPush();
+  } else if(gsUrl){
+    gsPush();
+  }
 }
-
 // ═══════════════════════════════
 //  HELPERS
 // ═══════════════════════════════
@@ -849,25 +1060,29 @@ function canDo(f){const cfg=permCfg();return op&&(cfg[op.perm||'staff']||[]).inc
 // ═══════════════════════════════
 async function init(){
   gsUrl = gsUrlLoad();
-  const saved = lsLoad();
-  if(saved){
-    S = Object.assign({products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],permConfig:null,settings:{}},saved);
-  }
-  if(!S.permConfig)S.permConfig=JSON.parse(JSON.stringify(DEFAULT_PERM));
-  if(!S.orgs)S.orgs=[];
-  if(!S.reservations)S.reservations=[];
-  if(!S.alchRecipes)S.alchRecipes=[];
   dcUrl = localStorage.getItem('dc_url')||'';
   dcEnabled = localStorage.getItem('dc_enabled')==='1';
 
-  if(gsUrl){
-    setSyncStatus('','SHEETS');
-    await gsPull();
+  // Firebase 初期化
+  const fbOk = initFirebase();
+
+  if(fbOk){
+    setSyncStatus('syncing','LOADING...');
+    await fbPull();
+    startRealtimeSync();
   } else {
-    setSyncStatus('','LOCAL');
+    const saved = lsLoad();
+    if(saved){
+      S = Object.assign({products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],alchRecipes:[],permConfig:null,settings:{}},saved);
+    }
+    if(!S.permConfig)S.permConfig=JSON.parse(JSON.stringify(DEFAULT_PERM));
+    if(!S.orgs)S.orgs=[];
+    if(!S.reservations)S.reservations=[];
+    if(!S.alchRecipes)S.alchRecipes=[];
+    if(gsUrl){setSyncStatus('','SHEETS');await gsPull();}
+    else{setSyncStatus('','LOCAL');}
   }
 
-  // Try session restore
   const sid=sessLoad();
   if(sid){const m=S.members.find(x=>x.id===sid);if(m){op=m;enterApp();return;}}
   renderLoginGrid();
@@ -1338,7 +1553,7 @@ function renderAdmOv(){
   document.getElementById('ov-mat').innerHTML=S.materials.length?S.materials.map(m=>{const s=sts(m);return`<tr><td style="font-weight:500">${m.name}</td><td>${m.qty}</td><td style="color:var(--tx2)">${m.unit||'個'}</td><td><span class="badge ${s.c}">${s.l}</span></td></tr>`}).join(''):`<tr><td colspan="4"><div class="empty">なし</div></td></tr>`;
 }
 function goAdmTab(id,el){
-  ['adm-ov','adm-prod','adm-mat','adm-recipe','adm-alchrecipe','adm-perm','adm-mem','adm-log','adm-discord','adm-gs','adm-misc'].forEach(t=>{
+  ['adm-ov','adm-prod','adm-mat','adm-recipe','adm-alchrecipe','adm-perm','adm-mem','adm-log','adm-discord','adm-gs','adm-firebase','adm-misc'].forEach(t=>{
     const x=document.getElementById(t);if(x){x.style.display='none';x.classList.remove('on');}
   });
   document.getElementById(id).style.display='block';
@@ -1624,6 +1839,66 @@ async function gsPushNow(){if(!gsUrl){toast('URLが設定されていません',
 async function gsPullNow(){if(!gsUrl){toast('URLが設定されていません',false);return;}const ok=await gsPull();if(ok){renderSidebar();toast('Google Sheetsから読み込みました');}}
 function copyGsCode(){try{navigator.clipboard.writeText(GS_SCRIPT_CODE);toast('コードをコピーしました');}catch(e){toast('コピーに失敗しました',false);}}
 
+
+
+// ═══════════════════════════════
+//  SYNC HELPERS
+// ═══════════════════════════════
+// バックグラウンドで静かにPull（UI表示なし）
+// 変更があった場合 true を返す
+async function gsPullSilent(){
+  if(!gsUrl) return false;
+  try{
+    const r = await fetch(gsUrl + '?t=' + Date.now()); // キャッシュ防止
+    if(!r.ok) return false;
+    const data = await r.json();
+    if(!data || !data.products) return false;
+    // ローカルと差分があるか確認（ログ件数で簡易チェック）
+    const localLogCount = S.logs.length;
+    const remoteLogCount = (data.logs||[]).length;
+    const localQtySum = S.products.reduce((s,p)=>s+p.qty,0);
+    const remoteQtySum = (data.products||[]).reduce((s,p)=>s+p.qty,0);
+    if(localLogCount === remoteLogCount && localQtySum === remoteQtySum) return false;
+    // 差分あり → データを更新
+    S = Object.assign({
+      products:[],materials:[],members:[],logs:[],
+      orgs:[],reservations:[],alchRecipes:[],
+      permConfig:null,settings:{}
+    }, data);
+    if(!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
+    if(!S.alchRecipes) S.alchRecipes = [];
+    lsSave(S);
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+// リモートデータを取得後にUIを更新する
+function applyRemoteData(){
+  // ログイン前やサイドバー非表示時は最低限の更新のみ
+  const sidebar = document.getElementById('sidebar');
+  if(!sidebar || sidebar.style.display==='none'){
+    // ログイン画面ならメンバーリストだけ更新
+    renderLoginGrid();
+    return;
+  }
+  // 現在表示中の画面を再描画
+  const activeScId = [...document.querySelectorAll('.sc.on')].map(el=>el.id)[0];
+  if(!activeScId) return;
+  const id = activeScId.replace('sc-','');
+  if(id==='sale') renderSalePage();
+  else if(id==='craft') renderCraftList();
+  else if(id==='stock') openStock();
+  else if(id==='matmgmt') openMatMgmt();
+  else if(id==='buymat') renderBmProdGrid();
+  else if(id==='alch') renderAlchList();
+  else if(id==='grp') renderGrpHist();
+  else if(id==='admin') renderAdmOv();
+  // 同期インジケーター表示
+  setSyncStatus('ok','↑ 更新あり');
+  setTimeout(()=>setSyncStatus('','SHEETS'), 2000);
+}
 
 // ═══════════════════════════════
 //  DISCORD
