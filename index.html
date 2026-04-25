@@ -824,11 +824,38 @@ async function fbPush() {
   }
 }
 
+// Firebase初回データ取得を待つPromise
+function fbFetchOnce() {
+  return new Promise((resolve, reject) => {
+    if (!fbRef) { resolve(false); return; }
+    fbRef.once('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data && data.products) {
+        S = Object.assign({
+          products:[], materials:[], members:[], logs:[],
+          orgs:[], reservations:[], alchRecipes:[],
+          permConfig:null, settings:{}
+        }, data);
+        if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
+        if (!S.alchRecipes) S.alchRecipes = [];
+        lsSave(S);
+      }
+      resolve(true);
+    }, (err) => {
+      console.warn('Firebase fetch error:', err);
+      resolve(false);
+    });
+  });
+}
+
+// リアルタイム購読（2回目以降の変更を監視）
 function fbSubscribe() {
   if (!fbRef) return;
   if (fbListener) fbRef.off('value', fbListener);
-  let isSelfPush = false;
+  let isFirst = true;
   fbListener = fbRef.on('value', (snapshot) => {
+    // 初回は fbFetchOnce で取得済みなのでスキップ
+    if (isFirst) { isFirst = false; return; }
     const data = snapshot.val();
     if (!data || !data.products) return;
     S = Object.assign({
@@ -951,10 +978,13 @@ async function init(){
   dcUrl = localStorage.getItem('dc_url')||'';
   dcEnabled = localStorage.getItem('dc_enabled')==='1';
 
-  // Firebase 初期化 → リアルタイム購読開始
+  // Firebase 初期化
   if(initFirebase()){
+    setSyncStatus('syncing','LOADING...');
+    // まず最初のデータを取得してから（awaitで待つ）セッション復元
+    await fbFetchOnce();
     setSyncStatus('ok','● LIVE');
-    fbSubscribe(); // リアルタイム購読（変更があると自動でUIに反映）
+    fbSubscribe(); // 以降はリアルタイム購読で変更を検知
   } else {
     // Firebase失敗時はlocalStorageから読み込み
     const saved = lsLoad();
@@ -968,6 +998,7 @@ async function init(){
     setSyncStatus('err','FB ERROR');
   }
 
+  // Firebaseからデータ取得後にセッション復元
   const sid=sessLoad();
   if(sid){const m=S.members.find(x=>x.id===sid);if(m){op=m;enterApp();return;}}
   renderLoginGrid();
