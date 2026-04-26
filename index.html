@@ -843,6 +843,10 @@ function fbFetchOnce() {
         }, data);
         if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
         if (!S.alchRecipes) S.alchRecipes = [];
+        if (!S.dcSettings) S.dcSettings = {};
+        if (S.dcSettings.url !== undefined) dcUrl = S.dcSettings.url;
+        if (S.dcSettings.enabled !== undefined) dcEnabled = S.dcSettings.enabled;
+        if (S.dcSettings.channels) dcChannels = S.dcSettings.channels;
         lsSave(S);
       }
       resolve(true);
@@ -870,6 +874,11 @@ function fbSubscribe() {
     }, data);
     if (!S.permConfig) S.permConfig = JSON.parse(JSON.stringify(DEFAULT_PERM));
     if (!S.alchRecipes) S.alchRecipes = [];
+    if (!S.dcSettings) S.dcSettings = {};
+    // FirebaseからdcSettingsを同期
+    if (S.dcSettings.url !== undefined) dcUrl = S.dcSettings.url;
+    if (S.dcSettings.enabled !== undefined) dcEnabled = S.dcSettings.enabled;
+    if (S.dcSettings.channels) dcChannels = S.dcSettings.channels;
     lsSave(S);
     applyRemoteData();
     setSyncStatus('ok', '● LIVE');
@@ -886,7 +895,7 @@ const LS_KEY = 'valcol_inv';
 const SESS_KEY = 'valcol_sess';
 const GS_KEY = 'valcol_gs_url';
 
-let S = {products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],alchRecipes:[],permConfig:null,settings:{}};
+let S = {products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],alchRecipes:[],permConfig:null,settings:{},dcSettings:{}};
 let op = null, pinBuf = '';
 let saleCart = [], saleCat = 'all';
 let grpCart = [], grpCat = 'all';
@@ -1903,11 +1912,19 @@ function saveDcUrl(){
   if(relay) localStorage.setItem('gas_relay_url', relay);
   else localStorage.removeItem('gas_relay_url');
   saveDcChannels();
-  toast(url ? 'Discord設定を保存しました' : '連携を無効にしました');
+  // Firebaseに同期
+  S.dcSettings = { url: dcUrl, enabled: dcEnabled, channels: dcChannels };
+  save();
+  toast(url ? 'Discord設定を保存・同期しました' : '連携を無効にしました');
 }
 function saveDcSettings(){
   dcEnabled = document.getElementById('dc-enabled').checked;
   localStorage.setItem('dc_enabled', dcEnabled?'1':'0');
+  // Firebaseに同期
+  if(S && fbRef){
+    S.dcSettings = { url: dcUrl, enabled: dcEnabled, channels: dcChannels };
+    save();
+  }
 }
 async function testDcWebhook(){
   const url = document.getElementById('dc-url').value.trim();
@@ -1963,7 +1980,14 @@ function saveDcChannels(){
     if(el && el.value.trim()) dcChannels[t] = el.value.trim();
   });
   localStorage.setItem('dc_channels', JSON.stringify(dcChannels));
-  toast('チャンネル設定を保存しました');
+  // Firebaseにも同期（saveDcUrl経由でなく直接呼ばれた場合）
+  if(S && fbRef){
+    S.dcSettings = { url: dcUrl, enabled: dcEnabled, channels: dcChannels };
+    save();
+    toast('チャンネル設定を保存・全デバイスに同期しました');
+  } else {
+    toast('チャンネル設定を保存しました');
+  }
 }
 
 // ═══════════════════════════════
@@ -2126,7 +2150,7 @@ function delAlchRecipe(i){
 }
 
 /* その他 */
-function resetAll(){if(!confirm('全データをリセットしますか？\nこの操作は取り消せません。'))return;S={products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],alchRecipes:[],permConfig:JSON.parse(JSON.stringify(DEFAULT_PERM)),settings:{}};save();doLogout();toast('リセットしました');}
+function resetAll(){if(!confirm('全データをリセットしますか？\nこの操作は取り消せません。'))return;S={products:[],materials:[],members:[],logs:[],orgs:[],reservations:[],alchRecipes:[],permConfig:JSON.parse(JSON.stringify(DEFAULT_PERM)),settings:{},dcSettings:{}};save();doLogout();toast('リセットしました');}
 
 // ═══════════════════════════════
 //  START
