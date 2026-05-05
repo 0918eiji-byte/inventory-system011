@@ -582,18 +582,25 @@ input[type=number]{font-size:18px;padding:12px 14px;min-height:46px}
     <div class="card"><div class="card-t">レシピを設定する商品</div>
       <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1;min-width:180px"><label class="lbl">商品を選択</label><select id="recipe-prod-sel" onchange="renderRecipeEditor()" style="max-width:260px"><option value="">-- 商品を選択 --</option></select></div>
-        <div style="width:160px">
-          <label class="lbl">バッチ数表示 <span style="color:var(--or)">（何個制作時の消費量を表示）</span></label>
-          <div style="display:flex;align-items:center;gap:8px">
-            <input id="recipe-batch-qty" type="number" min="1" value="30" style="width:80px;font-size:18px;padding:8px 12px" oninput="renderRecipeEditor()">
-            <span style="font-size:12px;color:var(--tx2)">個単位</span>
-          </div>
-        </div>
+
       </div>
     </div>
     <div id="recipe-editor" style="display:none">
       <div class="card">
         <div class="card-t" id="recipe-ed-title">レシピ編集</div>
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;padding:10px 14px;background:var(--bg3);border-radius:var(--r);border:var(--bd2)">
+          <div>
+            <label class="lbl">1回のクラフトで生産する個数</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input id="recipe-output-qty" type="number" min="1" value="1" style="width:90px;font-size:20px;padding:10px 12px" oninput="saveRecipeOutputQty()">
+              <span style="font-size:12px;color:var(--tx2)">個 / 回</span>
+            </div>
+          </div>
+          <div style="flex:1;font-size:11px;color:var(--tx2);line-height:1.7">
+            設定した素材を消費して<br>
+            <span id="recipe-output-preview" style="color:var(--or);font-weight:600">1個</span>を制作します
+          </div>
+        </div>
         <div style="font-size:12px;color:var(--tx2);margin-bottom:10px">1回のクラフトで消費する素材量を設定してください</div>
         <div id="recipe-lines"></div>
         <div style="margin-top:10px;display:flex;gap:8px;align-items:flex-end">
@@ -1222,7 +1229,10 @@ function renderCraftList(){
       <div style="flex:1">
         <div style="font-size:13px;font-weight:500">${p.name}</div>
         <div style="font-size:11px;color:var(--tx2);margin-top:3px"><span style="background:rgba(56,138,221,.2);color:#5898dd;padding:1px 5px;border-radius:3px;font-size:9px;font-family:Rajdhani,sans-serif">RECIPE</span> ${mn||'素材未設定'}</div>
-        <div style="font-size:11px;color:var(--tx3);margin-top:2px">在庫: ${p.qty}個${inCart?` <span style="color:#5898dd">▶ カート:${inCart.qty}個</span>`:''}
+        <div style="font-size:11px;color:var(--tx3);margin-top:2px">
+          在庫: ${p.qty}個
+          ${p.outputQty&&p.outputQty>1?`<span style="color:var(--or);margin-left:4px">${p.outputQty}個/回</span>`:''}
+          ${inCart?`<span style="color:#5898dd;margin-left:4px">▶ カート:${inCart.qty}回（計${(p.outputQty||1)*inCart.qty}個）</span>`:''}
         </div>
       </div>
       <div style="color:${inCart?'var(--or)':'var(--tx3)'};font-size:14px">${inCart?'●':'○'}</div>
@@ -1279,7 +1289,8 @@ function renderCraftAllPreview(){
   craftCart.forEach(c=>{
     const p=S.products.find(x=>parseInt(x.id)===c.productId);
     if(!p||!p.recipe||!p.recipe.length){canAll=false;return;}
-    matProduce.push({name:p.name,qty:c.qty,currentQty:p.qty});
+    const outQty=(p.outputQty||1)*c.qty;
+    matProduce.push({name:p.name,qty:outQty,currentQty:p.qty,execTimes:c.qty,outputQty:p.outputQty||1});
     p.recipe.forEach(r=>{const key=parseInt(r.matId);matConsume[key]=(matConsume[key]||0)+r.amount*c.qty;});
   });
   let matRows='';
@@ -1290,7 +1301,11 @@ function renderCraftAllPreview(){
     const pct=Math.min(100,Math.round(m.qty/Math.max(need,.001)*100));
     matRows+=`<div class="mrow"><div><span style="font-weight:500">${m.name}</span><span style="color:var(--tx3);font-size:10px;margin-left:5px">在庫:${m.qty}${m.unit||'個'}</span></div><div style="display:flex;align-items:center;gap:4px"><span style="color:${ok?'var(--ok)':'var(--ng)'};font-weight:${ok?400:600}">${need}${m.unit||'個'}消費</span><div class="mbarw"><div class="mbar" style="width:${pct}%;background:${ok?'var(--ok)':'var(--ng)'}"></div></div><span style="font-size:10px;color:${ok?'var(--ok)':'var(--ng)'}">${ok?'OK':'不足'}</span></div></div>`;
   });
-  const prodRows=matProduce.map(p=>`<div class="rrow"><span style="color:var(--tx2)">「${p.name}」</span><span style="color:var(--ok);font-weight:600">+${p.qty}個 → ${p.currentQty+p.qty}個</span></div>`).join('');
+  const prodRows=matProduce.map(p=>`<div class="rrow">
+    <span style="color:var(--tx2)">「${p.name}」</span>
+    <span style="color:var(--ok);font-weight:600">+${p.qty}個 → ${p.currentQty+p.qty}個</span>
+    ${p.outputQty>1?`<span style="font-size:10px;color:var(--tx3)">(${p.execTimes}回×${p.outputQty}個/回)</span>`:''}
+  </div>`).join('');
   if(btn){btn.disabled=!canAll;btn.style.opacity=canAll?'1':'0.45';}
   el.innerHTML=`<div style="margin-bottom:10px"><div style="font-size:11px;color:#5898dd;margin-bottom:6px;font-family:Rajdhani,sans-serif;letter-spacing:1px">消費素材（全カート合計）</div>${matRows||'<div class="empty">素材なし</div>'}</div><div class="rbox" style="background:rgba(56,138,221,.08);border-color:rgba(56,138,221,.3)"><div style="font-size:11px;font-weight:600;color:#5898dd;margin-bottom:5px;font-family:Rajdhani,sans-serif">制作後の変化</div>${prodRows}</div><div style="margin-top:8px;font-size:11px;color:var(--tx3)">担当者: ${op?.name||'—'}</div>`;
 }
@@ -1314,7 +1329,11 @@ async function submitCraftCart(){
   const logParts=[];
   craftCart.forEach(c=>{
     const p=S.products.find(x=>parseInt(x.id)===c.productId);
-    if(p){p.qty+=c.qty;logParts.push(`${p.name}×${c.qty}`);}
+    if(p){
+      const outQty=(p.outputQty||1)*c.qty; // 1回の制作で生産する個数 × 実行回数
+      p.qty+=outQty;
+      logParts.push(`${p.name}×${outQty}個（${c.qty}回制作）`);
+    }
   });
   const note=document.getElementById('craft-note').value;
   const matLog=Object.entries(matConsume).map(([mid,n])=>{const m=S.materials.find(x=>parseInt(x.id)===parseInt(mid));return m?`${m.name}-${n}${m.unit||'個'}`:null;}).filter(Boolean).join(',');
@@ -1699,23 +1718,39 @@ function renderRecipeTab(){
   const sel=document.getElementById('recipe-prod-sel');
   sel.innerHTML='<option value="">-- 商品を選択 --</option>'+S.products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   document.getElementById('recipe-add-mat').innerHTML='<option value="">-- 素材 --</option>'+S.materials.map(m=>`<option value="${m.id}">${m.name} (${m.unit||'個'})</option>`).join('');
-  // バッチ数の初期値を設定（設定が保存されていれば復元）
-  const batchEl = document.getElementById('recipe-batch-qty');
-  if(batchEl && !batchEl.value) batchEl.value = 30;
+
   renderRecipeEditor();
 }
-function renderRecipeEditor(){const pid=parseInt(document.getElementById('recipe-prod-sel').value);const prod=S.products.find(p=>p.id===pid);document.getElementById('recipe-editor').style.display=prod?'block':'none';if(!prod)return;document.getElementById('recipe-ed-title').textContent=`「${prod.name}」のレシピ`;const lines=document.getElementById('recipe-lines');if(!prod.recipe||!prod.recipe.length){lines.innerHTML='<div class="empty" style="padding:12px">素材がまだ設定されていません</div>';return;}// バッチ数を入力欄から取得（デフォルト30）
-const batchQty = parseInt(document.getElementById('recipe-batch-qty')?.value) || 30;
+function renderRecipeEditor(){const pid=parseInt(document.getElementById('recipe-prod-sel').value);const prod=S.products.find(p=>p.id===pid);document.getElementById('recipe-editor').style.display=prod?'block':'none';if(!prod)return;document.getElementById('recipe-ed-title').textContent=`「${prod.name}」のレシピ`;
+  // outputQty を読み込み
+  const oqEl=document.getElementById('recipe-output-qty');
+  if(oqEl){oqEl.value=prod.outputQty||1;updateRecipeOutputPreview(prod);}const lines=document.getElementById('recipe-lines');if(!prod.recipe||!prod.recipe.length){lines.innerHTML='<div class="empty" style="padding:12px">素材がまだ設定されていません</div>';return;}
 lines.innerHTML=prod.recipe.map((r,i)=>{const m=S.materials.find(x=>x.id===r.matId);const unit=m?m.unit||'個':'個';const batch=Math.round(r.amount*batchQty*10)/10;return`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:var(--bd2)">
 <span style="flex:1;font-size:13px;font-weight:500">${m?m.name:'不明'}</span>
-<span style="font-size:11px;color:var(--tx2)">1個→</span>
+<span style="font-size:11px;color:var(--tx2)">消費:</span>
 <input type="number" value="${r.amount}" min="0.1" step="0.1" style="width:68px;font-size:13px;background:var(--bg3);border:var(--bd2);border-radius:4px;color:var(--tx);padding:4px 8px" onchange="updateRL(${pid},${i},this.value)">
-<span style="font-size:11px;color:var(--tx2)">${unit}</span>
-<span style="font-size:11px;color:var(--or);background:var(--ord);padding:2px 8px;border-radius:4px;white-space:nowrap">${batchQty}個制作時 → ${batch}${unit}消費</span>
+<span style="font-size:11px;color:var(--tx2)">${unit} / 回</span>
 <button class="btn bs bd-btn" onclick="removeRL(${pid},${i})">×</button></div>`;}).join('');}
 function updateRL(pid,i,v){const p=S.products.find(x=>x.id===pid);if(p&&p.recipe[i])p.recipe[i].amount=parseFloat(v)||1;save();}
 function addRecipeLine(){const pid=parseInt(document.getElementById('recipe-prod-sel').value);const mid=parseInt(document.getElementById('recipe-add-mat').value);const amt=parseFloat(document.getElementById('recipe-add-amt').value)||1;const prod=S.products.find(p=>p.id===pid);if(!prod||!mid){toast('商品と素材を選んでください',false);return;}if(!prod.recipe)prod.recipe=[];if(prod.recipe.find(r=>r.matId===mid)){toast('既に追加済みです',false);return;}prod.recipe.push({matId:mid,amount:amt});const recipeTxt=`レシピ更新: ${prod.name}`;addLog('ADMIN',recipeTxt,op?.name);dcSend('ADMIN',recipeTxt,op?.name);save();document.getElementById('recipe-add-mat').value='';document.getElementById('recipe-add-amt').value='';renderRecipeEditor();toast('素材を追加しました');}
 function removeRL(pid,i){const p=S.products.find(x=>x.id===pid);if(p&&p.recipe)p.recipe.splice(i,1);save();renderRecipeEditor();}
+
+function saveRecipeOutputQty(){
+  const pid=parseInt(document.getElementById('recipe-prod-sel').value);
+  const prod=S.products.find(p=>p.id===pid);
+  if(!prod)return;
+  const qty=parseInt(document.getElementById('recipe-output-qty').value)||1;
+  prod.outputQty=Math.max(1,qty);
+  save();
+  updateRecipeOutputPreview(prod);
+}
+
+function updateRecipeOutputPreview(prod){
+  const el=document.getElementById('recipe-output-preview');
+  if(!el)return;
+  const qty=prod.outputQty||1;
+  el.textContent=`${prod.name} ${qty}個`;
+}
 /* 権限設定 */
 function renderPermTable(){
   const cfg=permCfg();const roles=['staff','chief','admin'];
